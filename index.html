@@ -16,8 +16,8 @@
       </div>
     </div>
     <nav class="section-nav" aria-label="Studio sections">
-      <button id="nav-annotation" type="button" aria-controls="sec-annotation" aria-pressed="true"><span>01</span> Image Annotation</button>
-      <button id="nav-video" type="button" aria-controls="sec-video" aria-pressed="false"><span>02</span> HTML to Video</button>
+      <a id="nav-annotation" href="./image-annotation/index.html" aria-controls="sec-annotation" aria-current="page"><span>01</span> Image Annotation</a>
+      <a id="nav-video" href="./html-to-video/index.html" aria-controls="sec-video"><span>02</span> HTML to Video</a>
     </nav>
   </header>
 
@@ -27,7 +27,7 @@
         <div><p class="eyebrow">WORKSPACE 01</p><h2 id="h-ann">Image Annotation</h2></div>
         <div id="status-annotation" class="save-status" role="status" aria-live="polite">Restoring local work…</div>
       </div>
-      <p class="workflow-note">Import originals, draw and label shapes, then export the untouched source images.</p>
+      <p class="workflow-note">Import originals, crop and annotate them, add standalone text, then copy or download the edited PNG. Reset source restores the original pixels and pre-crop overlays.</p>
 
       <div class="annotation-grid">
         <aside class="rail panel" aria-label="Image library">
@@ -41,6 +41,33 @@
         </aside>
 
         <div class="canvas-panel panel">
+          <section class="image-edit-tools" aria-label="Image editing">
+            <div class="image-meta">
+              <label for="image-name">Image name
+                <input id="image-name" type="text" autocomplete="off" disabled>
+              </label>
+              <dl class="image-facts">
+                <div><dt>Dimensions</dt><dd id="image-dimensions">—</dd></div>
+                <div><dt>Type</dt><dd id="image-type">—</dd></div>
+              </dl>
+            </div>
+            <div class="crop-actions" aria-label="Crop controls">
+              <button id="start-crop" type="button">Crop image</button>
+              <button id="apply-crop" type="button" class="primary" hidden>Apply crop</button>
+              <button id="cancel-crop" type="button" hidden>Cancel</button>
+              <button id="reset-image" type="button">Reset source</button>
+              <button id="download-png" type="button">Download PNG</button>
+            </div>
+            <div class="text-tools" aria-label="Standalone text overlay">
+              <label for="text-overlay-input">Text overlay</label>
+              <div class="text-overlay-row">
+                <input id="text-overlay-input" type="text" placeholder="Enter text" autocomplete="off" disabled>
+                <input id="text-overlay-size" type="number" min="8" max="144" value="32" aria-label="Text size" disabled>
+                <input id="text-overlay-color" type="color" value="#17202b" aria-label="Text color" disabled>
+                <button id="place-text" type="button" disabled>Place text</button>
+              </div>
+            </div>
+          </section>
           <div class="toolbar" role="toolbar" aria-label="Shape tools" id="tools"></div>
           <div class="tool-row">
             <div class="toolbar" role="toolbar" aria-label="Annotation colors" id="colors"></div>
@@ -65,6 +92,8 @@
           <p class="field-help">Tags update as you type.</p>
           <h3>Annotations</h3>
           <ol id="annotation-list" class="item-list"></ol>
+          <h3>Text overlays</h3>
+          <ol id="text-overlay-list" class="item-list"></ol>
         </aside>
       </div>
     </section>

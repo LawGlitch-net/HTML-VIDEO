@@ -78,21 +78,45 @@ function storageFailure(section,error) {
   $('storage-detail').textContent=msg;
 }
 
-function nav(section) {
+function appRouteSection() {
+  const path=decodeURIComponent(location.pathname.replace(/\\/g,'/')).toLowerCase();
+  if(path.includes('/html-to-video')||/html-to-video(?:[/.]|$)/.test(path))return 'video';
+  return 'annotation';
+}
+function routeBaseUrl() {
+  const path=decodeURIComponent(location.pathname.replace(/\\/g,'/')).toLowerCase();
+  if(/\/(?:image-annotation|html-to-video)(?:\/(?:index\.html)?|\/?|\.html)?$/.test(path)) {
+    return new URL('../',location.href);
+  }
+  return new URL('./',location.href);
+}
+function routeUrl(section) {
+  const base=routeBaseUrl();
+  return section==='video'
+    ? new URL('html-to-video/index.html',base).href
+    : new URL('image-annotation/index.html',base).href;
+}
+function nav(section,push=true) {
   $('sec-annotation').hidden=section!=='annotation';
   $('sec-video').hidden=section!=='video';
-  $('nav-annotation').setAttribute('aria-pressed',section==='annotation');
-  $('nav-video').setAttribute('aria-pressed',section==='video');
+  $('nav-annotation').toggleAttribute('aria-current',section==='annotation');
+  $('nav-video').toggleAttribute('aria-current',section==='video');
+  if(section==='annotation')$('nav-annotation').setAttribute('aria-current','page');else $('nav-annotation').removeAttribute('aria-current');
+  if(section==='video')$('nav-video').setAttribute('aria-current','page');else $('nav-video').removeAttribute('aria-current');
+  $('nav-annotation').href=routeUrl('annotation');
+  $('nav-video').href=routeUrl('video');
+  if(push)history.pushState({section},'',routeUrl(section));
   if(section==='video'&&!V.scenes.length)addScene(true);
   requestAnimationFrame(()=>document.querySelectorAll('.stage iframe').forEach(sizePreview));
 }
-$('nav-annotation').onclick=()=>nav('annotation');
-$('nav-video').onclick=()=>nav('video');
+$('nav-annotation').onclick=e=>{e.preventDefault();nav('annotation');};
+$('nav-video').onclick=e=>{e.preventDefault();nav('video');};
+window.addEventListener('popstate',()=>nav(appRouteSection(),false));
 
 /* ================= IMAGE ANNOTATION ================= */
 const COLORS={Red:'#f02d24',Lime:'#69bd45',Cyan:'#23a7b7',Yellow:'#e8b500',Magenta:'#d33d98',Orange:'#df751c'};
 const TOOLS=[['select','Select / move'],['rectangle','Rectangle'],['square','Square'],['circle','Ellipse'],['line','Line'],['arrow','Arrow'],['freehand','Freehand']];
-const A={imgs:[],cur:-1,tool:'rectangle',color:COLORS.Red,width:4,sel:null,drag:null,uid:0,pasteN:0};
+const A={imgs:[],cur:-1,tool:'rectangle',color:COLORS.Red,width:4,sel:null,drag:null,crop:null,textPlacement:null,uid:0,pasteN:0};
 const cv=$('annotation-canvas'),ctx=cv.getContext('2d');
 const curImg=()=>A.imgs[A.cur];
 const curShapes=()=>curImg()?curImg().shapes:[];
@@ -107,7 +131,7 @@ function scheduleAnnotationSave(message='Saving…') {
 async function saveAnnotation() {
   const epoch=mutationEpoch;
   try {
-    const payload=A.imgs.map(({name,mime,url,shapes,uid})=>({name,mime,url,shapes,uid}));
+    const payload=A.imgs.map(({name,mime,url,originalUrl,originalMime,originalName,shapes,texts,cropHistory,uid})=>({name,mime,url,originalUrl,originalMime,originalName,shapes,texts:texts||[],cropHistory:cropHistory||[],uid}));
     const saved=await enqueueIdbWrite('images',payload,()=>mutationEpoch===epoch);
     if(saved&&mutationEpoch===epoch)setStatus('status-annotation','Saved locally','', '');
   } catch(error){storageFailure('annotation',error);}
@@ -115,7 +139,7 @@ async function saveAnnotation() {
 
 TOOLS.forEach(([key,label])=>{
   const b=document.createElement('button');b.type='button';b.id='shape-tool-'+key;b.textContent=label;
-  b.onclick=()=>{A.tool=key;if(key!=='select')A.sel=null;refreshTools();refreshUI();};
+  b.onclick=()=>{A.tool=key;A.textPlacement=null;if(key!=='select')A.sel=null;cancelCropSelection(false);refreshTools();refreshUI();};
   $('tools').append(b);
 });
 Object.entries(COLORS).forEach(([name,color])=>{
@@ -142,7 +166,7 @@ function addImageFile(file,pasted) {
     const name=pasted?`pasted-image-${++A.pasteN}.${ext}`:(file.name||`image-${A.imgs.length+1}.${ext}`);
     const image=new Image();
     image.onload=()=>{
-      A.imgs.push({name,mime,url,img:image,shapes:[],undo:[],uid:++A.uid});
+      A.imgs.push({name,mime,url,originalUrl:url,originalMime:mime,originalName:name,img:image,originalImg:image,shapes:[],texts:[],cropHistory:[],undo:[],uid:++A.uid});
       A.cur=A.imgs.length-1;A.sel=null;refreshUI();scheduleAnnotationSave(`Added ${name}`);setStatus('status-annotation',`Added ${name}`,'','saving');
     };
     image.onerror=()=>setStatus('status-annotation',`Error: ${name} is not a readable image.`,true);
@@ -201,6 +225,26 @@ function refreshUI() {
   });
   const tagInput=$('shape-tag-input'),selected=selShape();tagInput.disabled=!selected;
   if(document.activeElement!==tagInput)tagInput.value=selected?selected.tag:'';
+  const model=curImg();
+  const nameInput=$('image-name');
+  nameInput.disabled=!model;
+  if(model&&document.activeElement!==nameInput)nameInput.value=model.name;
+  $('image-dimensions').textContent=model?`${model.img.naturalWidth} × ${model.img.naturalHeight}`:'—';
+  $('image-type').textContent=model?(model.mime||'unknown').replace('image/','').toUpperCase():'—';
+  $('start-crop').disabled=!model;$('reset-image').disabled=!model;$('download-png').disabled=!model;
+  $('text-overlay-input').disabled=!model;$('text-overlay-size').disabled=!model;$('text-overlay-color').disabled=!model;$('place-text').disabled=!model;
+  const textList=$('text-overlay-list');textList.innerHTML='';
+  if(model){
+    (model.texts||=[]).forEach((text,index)=>{
+      const li=document.createElement('li'),label=document.createElement('span');
+      label.className='name';label.textContent=`#${index+1} ${text.text||'(empty)'}`;
+      label.title='Standalone text overlay';
+      const remove=document.createElement('button');remove.type='button';remove.textContent='Remove';remove.className='danger-quiet';
+      remove.setAttribute('aria-label','Remove text overlay '+(text.text||index+1));
+      remove.onclick=()=>{snapshot();model.texts.splice(index,1);scheduleAnnotationSave('Text overlay removed');refreshUI();};
+      li.append(label,remove);textList.append(li);
+    });
+  }
   if(curImg()){cv.width=curImg().img.naturalWidth;cv.height=curImg().img.naturalHeight;}
   draw();
 }
@@ -208,6 +252,132 @@ $('shape-tag-input').oninput=e=>{
   const shape=selShape();if(!shape)return;shape.tag=e.target.value;draw();
   const index=curShapes().indexOf(shape),button=$('annotation-item-'+(index+1));if(button)button.textContent=`#${index+1} ${shape.type} — ${shape.tag||'(no tag)'}`;
   scheduleAnnotationSave();
+};
+
+$('image-name').oninput=e=>{
+  const model=curImg();if(!model)return;
+  model.name=e.target.value.trim()||model.originalName||`image-${A.cur+1}.png`;
+  scheduleAnnotationSave('Renaming image…');
+  refreshUI();
+};
+
+$('place-text').onclick=()=>{
+  const model=curImg();if(!model)return;
+  const text=$('text-overlay-input').value.trim();
+  if(!text){setStatus('status-annotation','Enter text before placing it.',true);$('text-overlay-input').focus();return;}
+  A.textPlacement={active:true};A.crop=null;$('place-text').textContent='Click canvas';
+  setStatus('status-annotation','Text ready: click the image canvas to place it.');
+};
+
+function cancelCropSelection(update=true){
+  A.crop=null;$('apply-crop').hidden=true;$('cancel-crop').hidden=true;$('start-crop').hidden=false;
+  if(update)draw();
+}
+$('start-crop').onclick=()=>{
+  const model=curImg();if(!model)return setStatus('status-annotation','Import an image before cropping.',true);
+  A.textPlacement=null;$('place-text').textContent='Place text';A.sel=null;
+  A.crop={active:true,selection:null,drag:null};
+  $('start-crop').hidden=true;$('apply-crop').hidden=false;$('cancel-crop').hidden=false;
+  setStatus('status-annotation','Drag on the image to select a crop area.');
+  cv.focus();
+};
+$('cancel-crop').onclick=()=>{cancelCropSelection();setStatus('status-annotation','Crop cancelled.');};
+
+function transformShapeForCrop(shape,c){
+  const next=JSON.parse(JSON.stringify(shape));
+  const transformPoint=p=>{
+    return [Math.max(0,Math.min(c.width,p[0]-c.x)),Math.max(0,Math.min(c.height,p[1]-c.y))];
+  };
+  if(next.pts)next.pts=next.pts.map(transformPoint);
+  ['x1','x2','y1','y2'].forEach(key=>{
+    if(next[key]!==undefined)next[key]=key[0]==='x'?Math.max(0,Math.min(c.width,next[key]-c.x)):Math.max(0,Math.min(c.height,next[key]-c.y));
+  });
+  return next;
+}
+$('apply-crop').onclick=()=>{
+  const model=curImg(),selection=A.crop?.selection;
+  if(!model||!selection)return setStatus('status-annotation','Drag a crop area first.',true);
+  const c={x:Math.round(selection.x),y:Math.round(selection.y),width:Math.round(selection.width),height:Math.round(selection.height)};
+  if(c.width<10||c.height<10)return setStatus('status-annotation','Crop area is too small.',true);
+  snapshot();
+  try{
+    const canvas=document.createElement('canvas');canvas.width=c.width;canvas.height=c.height;
+    const target=canvas.getContext('2d');if(!target)throw new Error('Could not create the crop canvas.');
+    target.drawImage(model.img,c.x,c.y,c.width,c.height,0,0,c.width,c.height);
+    const croppedUrl=canvas.toDataURL(model.mime==='image/jpeg'?'image/jpeg':'image/png');
+    const image=new Image();
+    image.onload=()=>{
+      model.cropHistory=model.cropHistory||[];
+      model.cropHistory.push({
+        crop:{x:c.x,y:c.y,width:c.width,height:c.height},
+        shapes:JSON.parse(JSON.stringify(model.shapes||[])),
+        texts:JSON.parse(JSON.stringify(model.texts||[]))
+      });
+      model.url=croppedUrl;model.img=image;model.mime=croppedUrl.startsWith('data:image/jpeg')?'image/jpeg':'image/png';
+      model.shapes=(model.shapes||[]).filter(shape=>{
+        const b=bbox(shape);
+        return b.x2>=c.x&&b.x1<=c.x+c.width&&b.y2>=c.y&&b.y1<=c.y+c.height;
+      }).map(shape=>transformShapeForCrop(shape,c));
+      model.texts=(model.texts||[]).filter(text=>text.x>=c.x&&text.x<=c.x+c.width&&text.y>=c.y&&text.y<=c.y+c.height)
+        .map(text=>({...text,x:Math.max(0,Math.min(c.width,text.x-c.x)),y:Math.max(0,Math.min(c.height,text.y-c.y))}));
+      cancelCropSelection(false);A.sel=null;refreshUI();scheduleAnnotationSave('Applied crop');setStatus('status-annotation','Crop applied. Existing shapes and text were repositioned.');
+      canvas.width=1;canvas.height=1;
+    };
+    image.onerror=()=>{canvas.width=1;canvas.height=1;setStatus('status-annotation','Could not load the cropped image.',true);};
+    image.src=croppedUrl;
+  }catch(error){
+    setStatus('status-annotation','Could not apply crop: '+(error?.message||String(error)),true);
+  }
+};
+$('reset-image').onclick=()=>{
+  const model=curImg();if(!model)return;
+  if(!model.originalUrl)return setStatus('status-annotation','This image has no saved source to restore.',true);
+  snapshot();
+  const history=Array.isArray(model.cropHistory)?model.cropHistory:[];
+  const transformShape=(shape,crops)=>{
+    const next=JSON.parse(JSON.stringify(shape));
+    const shiftPoint=p=>{
+      let [x,y]=p;
+      for(let i=crops.length-1;i>=0;i--){const c=crops[i];x+=c.x;y+=c.y;}
+      return [x,y];
+    };
+    if(next.pts)next.pts=next.pts.map(shiftPoint);
+    ['x1','x2'].forEach(key=>{if(next[key]!==undefined)for(let i=crops.length-1;i>=0;i--)next[key]+=crops[i].x;});
+    ['y1','y2'].forEach(key=>{if(next[key]!==undefined)for(let i=crops.length-1;i>=0;i--)next[key]+=crops[i].y;});
+    return next;
+  };
+  const transformText=(text,crops)=>{
+    const next={...text};
+    for(let i=crops.length-1;i>=0;i--){next.x+=crops[i].x;next.y+=crops[i].y;}
+    return next;
+  };
+  const restoredShapes=new Map(),restoredTexts=new Map();
+  history.forEach((entry,index)=>{
+    const earlier=history.slice(0,index).map(item=>item.crop).filter(Boolean);
+    (entry.shapes||[]).forEach(shape=>restoredShapes.set(shape.id,transformShape(shape,earlier)));
+    (entry.texts||[]).forEach(text=>restoredTexts.set(text.id,transformText(text,earlier)));
+  });
+  const allCrops=history.map(entry=>entry.crop).filter(Boolean);
+  (model.shapes||[]).forEach(shape=>restoredShapes.set(shape.id,transformShape(shape,allCrops)));
+  (model.texts||[]).forEach(text=>restoredTexts.set(text.id,transformText(text,allCrops)));
+  const image=model.originalImg;
+  if(image){model.url=model.originalUrl;model.mime=model.originalMime||model.mime;model.img=image;}
+  else{
+    const restored=new Image();
+    restored.onload=()=>{
+      model.url=model.originalUrl;model.img=restored;model.mime=model.originalMime||model.mime;
+      model.shapes=[...restoredShapes.values()];model.texts=[...restoredTexts.values()];
+      model.cropHistory=[];cancelCropSelection(false);A.sel=null;refreshUI();scheduleAnnotationSave('Restored source image');
+      setStatus('status-annotation','Original source and pre-crop overlays restored.');
+    };
+    restored.onerror=()=>setStatus('status-annotation','Could not restore the original source image.',true);
+    restored.src=model.originalUrl;return;
+  }
+  model.shapes=[...restoredShapes.values()];
+  model.texts=[...restoredTexts.values()];
+  model.cropHistory=[];
+  cancelCropSelection(false);A.sel=null;refreshUI();scheduleAnnotationSave('Restored source image');
+  setStatus('status-annotation','Original source and pre-crop overlays restored.');
 };
 
 function bbox(shape) {
@@ -237,17 +407,36 @@ function drawAnnotations(target,model,k,selectedId=null,showSelection=false) {
     if(showSelection&&shape.id===selectedId){target.setLineDash([8*k,6*k]);target.strokeStyle='#fff';target.lineWidth=2*k;target.strokeRect(b.x1,b.y1,b.x2-b.x1,b.y2-b.y1);target.setLineDash([]);handles(shape).forEach(h=>{target.fillStyle='#fff';target.strokeStyle='#000';target.fillRect(h.x-6*k,h.y-6*k,12*k,12*k);target.strokeRect(h.x-6*k,h.y-6*k,12*k,12*k);});}
   });
 }
+function drawTextOverlays(target,model,k) {
+  (model.texts||[]).forEach(text=>{
+    const size=(text.size||32)*k;
+    target.font=`700 ${size}px system-ui`;
+    target.textBaseline='alphabetic';
+    target.lineWidth=Math.max(2*k,Math.round(size*.08));
+    target.strokeStyle='rgba(0,0,0,.65)';
+    target.strokeText(text.text||'',text.x,text.y);
+    target.fillStyle=text.color||'#17202b';
+    target.fillText(text.text||'',text.x,text.y);
+  });
+}
 function draw() {
   ctx.clearRect(0,0,cv.width,cv.height);const model=curImg();
   if(!model){ctx.fillStyle='#667180';ctx.font='24px system-ui';ctx.fillText('Import an image to begin',40,60);return;}
-  ctx.drawImage(model.img,0,0);drawAnnotations(ctx,model,K(),A.sel,true);
+  ctx.drawImage(model.img,0,0);drawAnnotations(ctx,model,K(),A.sel,true);drawTextOverlays(ctx,model,K());
+  if(A.crop?.selection){
+    const c=A.crop.selection;ctx.save();ctx.fillStyle='rgba(23,32,43,.32)';
+    ctx.fillRect(0,0,cv.width,c.y);ctx.fillRect(0,c.y+c.height,cv.width,cv.height-c.y-c.height);
+    ctx.fillRect(0,c.y,c.x,c.height);ctx.fillRect(c.x+c.width,c.y,cv.width-c.x-c.width,c.height);
+    ctx.strokeStyle='#fff';ctx.lineWidth=2*K();ctx.setLineDash([10*K(),7*K()]);
+    ctx.strokeRect(c.x,c.y,c.width,c.height);ctx.restore();
+  }
 }
 function handles(shape){
   if(shape.type==='line'||shape.type==='arrow')return[{x:shape.x1,y:shape.y1,k:'p1'},{x:shape.x2,y:shape.y2,k:'p2'}];
   const b=bbox(shape);return[{x:b.x1,y:b.y1,k:'nw'},{x:b.x2,y:b.y1,k:'ne'},{x:b.x1,y:b.y2,k:'sw'},{x:b.x2,y:b.y2,k:'se'}];
 }
 function snapshot(){
-  const model=curImg();if(!model)return;model.undo.push(JSON.stringify(model.shapes));if(model.undo.length>100)model.undo.shift();
+  const model=curImg();if(!model)return;model.undo.push(JSON.stringify({shapes:model.shapes,texts:model.texts||[]}));if(model.undo.length>100)model.undo.shift();
 }
 const pos=e=>{const r=cv.getBoundingClientRect();return[(e.clientX-r.left)*cv.width/r.width,(e.clientY-r.top)*cv.height/r.height];};
 function dseg(px,py,a,b,c,d){const dx=c-a,dy=d-b,l=dx*dx+dy*dy;let t=l?((px-a)*dx+(py-b)*dy)/l:0;t=Math.max(0,Math.min(1,t));return Math.hypot(px-a-t*dx,py-b-t*dy);}
@@ -260,6 +449,17 @@ function hit(shape,x,y){
 cv.addEventListener('pointerdown',e=>{
   const model=curImg();if(!model)return setStatus('status-annotation','Import or paste an image first.',true);
   cv.setPointerCapture(e.pointerId);const[x,y]=pos(e),k=K();
+  if(A.crop?.active){
+    A.crop.drag={x1:x,y1:y,x2:x,y2:y};draw();return;
+  }
+  if(A.textPlacement){
+    const input=$('text-overlay-input'),text=(input.value||'').trim();
+    if(!text){setStatus('status-annotation','Enter text before placing it.',true);return;}
+    snapshot();const size=Math.max(8,Math.min(144,+$('text-overlay-size').value||32));
+    (model.texts||=[]).push({id:++A.uid,text,x,y,size,color:$('text-overlay-color').value||'#17202b'});
+    A.textPlacement=null;$('place-text').textContent='Place text';draw();refreshUI();scheduleAnnotationSave('Text overlay placed');setStatus('status-annotation','Text overlay placed. It is separate from shape annotations.');
+    return;
+  }
   if(A.tool==='select'){
     const selected=selShape();if(selected){const handle=handles(selected).find(h=>Math.abs(h.x-x)<10*k&&Math.abs(h.y-y)<10*k);if(handle){snapshot();A.drag={mode:'resize',h:handle.k,orig:JSON.parse(JSON.stringify(selected)),id:selected.id};return;}}
     const found=[...model.shapes].reverse().find(shape=>hit(shape,x,y));A.sel=found?found.id:null;
@@ -269,6 +469,12 @@ cv.addEventListener('pointerdown',e=>{
   model.shapes.push(shape);A.sel=id;A.drag={mode:'create',id,sx:x,sy:y};
 });
 cv.addEventListener('pointermove',e=>{
+  if(A.crop?.drag){
+    const[x,y]=pos(e);A.crop.drag.x2=Math.max(0,Math.min(cv.width,x));A.crop.drag.y2=Math.max(0,Math.min(cv.height,y));
+    draw();const c=A.crop.drag,x1=Math.min(c.x1,c.x2),y1=Math.min(c.y1,c.y2),x2=Math.max(c.x1,c.x2),y2=Math.max(c.y1,c.y2);
+    ctx.save();ctx.strokeStyle='#fff';ctx.lineWidth=2*K();ctx.setLineDash([10*K(),7*K()]);
+    ctx.strokeRect(x1,y1,x2-x1,y2-y1);ctx.restore();return;
+  }
   const drag=A.drag;if(!drag)return;const shape=selShape();if(!shape)return;const[x,y]=pos(e);
   if(drag.mode==='create'){if(shape.type==='freehand')shape.pts.push([x,y]);else if(shape.type==='square'){const length=Math.max(Math.abs(x-drag.sx),Math.abs(y-drag.sy));shape.x2=drag.sx+Math.sign(x-drag.sx||1)*length;shape.y2=drag.sy+Math.sign(y-drag.sy||1)*length;}else{shape.x2=x;shape.y2=y;}}
   else if(drag.mode==='move'){const dx=x-drag.sx,dy=y-drag.sy,o=drag.orig;if(o.pts)shape.pts=o.pts.map(p=>[p[0]+dx,p[1]+dy]);else{shape.x1=o.x1+dx;shape.x2=o.x2+dx;shape.y1=o.y1+dy;shape.y2=o.y2+dy;}}
@@ -276,6 +482,13 @@ cv.addEventListener('pointermove',e=>{
   draw();
 });
 cv.addEventListener('pointerup',()=>{
+  if(A.crop?.drag){
+    const c=A.crop.drag;A.crop.drag=null;
+    const w=Math.abs(c.x2-c.x1),h=Math.abs(c.y2-c.y1);
+    if(w<10||h<10){setStatus('status-annotation','Drag a larger crop area.',true);return;}
+    A.crop.selection={x:Math.min(c.x1,c.x2),y:Math.min(c.y1,c.y2),width:w,height:h};
+    draw();return;
+  }
   const drag=A.drag;A.drag=null;if(!drag)return;const shape=selShape();
   if(shape&&drag.mode==='create'){const b=bbox(shape);if(b.x2-b.x1<4&&b.y2-b.y1<4){curImg().shapes=curImg().shapes.filter(s=>s!==shape);curImg().undo.pop();A.sel=null;}else setStatus('status-annotation',`Drew ${shape.type}. Add a tag if needed.`);}
   scheduleAnnotationSave();refreshUI();
@@ -290,7 +503,10 @@ document.addEventListener('keydown',e=>{
 });
 $('undo-action').onclick=()=>{
   const model=curImg();if(!model||!model.undo.length)return setStatus('status-annotation','Nothing to undo.',true);
-  model.shapes=JSON.parse(model.undo.pop());A.sel=null;refreshUI();scheduleAnnotationSave('Undid last action');
+  const previous=JSON.parse(model.undo.pop());
+  if(Array.isArray(previous)){model.shapes=previous;model.texts=model.texts||[];}
+  else{model.shapes=previous.shapes||[];model.texts=previous.texts||[];}
+  A.sel=null;refreshUI();scheduleAnnotationSave('Undid last action');
 };
 $('clear-annotations').onclick=()=>{
   const model=curImg();if(!model)return;snapshot();model.shapes=[];A.sel=null;refreshUI();scheduleAnnotationSave('Cleared all annotations');
@@ -307,6 +523,7 @@ function renderEditedPng(model) {
       if(!target)throw new Error('Could not create an image canvas for '+model.name+'.');
       target.drawImage(model.img,0,0);
       drawAnnotations(target,model,Math.max(1,width/800));
+      drawTextOverlays(target,model,Math.max(1,width/800));
       canvas.toBlob(blob=>{
         canvas.width=1;canvas.height=1;
         if(!blob)reject(new Error('Could not encode '+model.name+' as PNG.'));
@@ -388,6 +605,18 @@ async function renderEditedPngComposite(models) {
   }
 }
 $('copy-all-images').onclick=()=>copyEditedImages(A.imgs.slice());
+
+$('download-png').onclick=async()=>{
+  const model=curImg();if(!model)return setStatus('status-annotation','Import an image before downloading.',true);
+  try{
+    const blob=await renderEditedPng(model);
+    const url=URL.createObjectURL(blob),link=document.createElement('a');
+    const base=(model.name||'annotated-image').replace(/\.[^.]+$/,'').replace(/[<>:"/\\|?*\u0000-\u001F]/g,'-')||'annotated-image';
+    link.href=url;link.download=base+'-annotated.png';document.body.append(link);link.click();link.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+    setStatus('status-annotation','Download started: '+link.download);
+  }catch(error){setStatus('status-annotation','Could not download PNG: '+(error?.message||String(error)),true);}
+};
 
 /* Base64 export in an isolated full-payload tab */
 $('export-base64').onclick=()=>{
@@ -671,8 +900,18 @@ async function restore(){
       for(const record of images){
         const image=new Image();await new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=reject;image.src=record.url;});
         const shapes=Array.isArray(record.shapes)?record.shapes:[];
-        A.uid=Math.max(A.uid,Number(record.uid)||0,...shapes.map(shape=>Number(shape.id)||0));
-        A.imgs.push({name:record.name,mime:record.mime,url:record.url,img:image,shapes,undo:[],uid:Number(record.uid)||++A.uid});
+        const texts=Array.isArray(record.texts)?record.texts:[];
+        const cropHistory=Array.isArray(record.cropHistory)?record.cropHistory:[];
+        A.uid=Math.max(A.uid,Number(record.uid)||0,...shapes.map(shape=>Number(shape.id)||0),...texts.map(text=>Number(text.id)||0));
+        let originalImg=image;
+        const originalUrl=record.originalUrl||record.url;
+        if(originalUrl!==record.url){
+          originalImg=new Image();
+          await new Promise(resolve=>{
+            originalImg.onload=resolve;originalImg.onerror=resolve;originalImg.src=originalUrl;
+          }).catch(()=>{});
+        }
+        A.imgs.push({name:record.name,mime:record.mime,url:record.url,originalUrl,originalMime:record.originalMime||record.mime,originalName:record.originalName||record.name,img:image,originalImg,shapes,texts,cropHistory,undo:[],uid:Number(record.uid)||++A.uid});
       }
       A.cur=0;
     }
@@ -697,6 +936,7 @@ async function restore(){
   refreshUI();renderScenes();
 }
 refreshUI();
+nav(appRouteSection(),false);
 restore();
 window.addEventListener('beforeunload',()=>{
   clearTimeout(annotationSaveTimer);
