@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Annotation &amp; Video Studio</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="identity">
+      <span class="studio-mark" aria-hidden="true">A/V</span>
+      <div>
+        <h1>Annotation &amp; Video Studio</h1>
+        <p>Local creative workbench</p>
+      </div>
+    </div>
+    <nav class="section-nav" aria-label="Studio sections">
+      <button id="nav-annotation" type="button" aria-controls="sec-annotation" aria-pressed="true"><span>01</span> Image Annotation</button>
+      <button id="nav-video" type="button" aria-controls="sec-video" aria-pressed="false"><span>02</span> HTML to Video</button>
+    </nav>
+  </header>
+
+  <main>
+    <section id="sec-annotation" aria-labelledby="h-ann">
+      <div class="section-heading">
+        <div><p class="eyebrow">WORKSPACE 01</p><h2 id="h-ann">Image Annotation</h2></div>
+        <div id="status-annotation" class="save-status" role="status" aria-live="polite">Restoring local work…</div>
+      </div>
+      <p class="workflow-note">Import originals, draw and label shapes, then export the untouched source images.</p>
+
+      <div class="annotation-grid">
+        <aside class="rail panel" aria-label="Image library">
+          <div id="image-paste-area" class="paste-zone" tabindex="0" role="button" aria-label="Paste an image with Control or Command plus V">Paste from clipboard<br><kbd>Ctrl/⌘ + V</kbd></div>
+          <label for="image-upload">Import image files</label>
+          <input id="image-upload" type="file" accept="image/*" multiple>
+          <h3>Imported images</h3>
+          <ul id="image-list" class="item-list"><li class="empty">No images yet.</li></ul>
+          <button id="copy-all-images" type="button" class="full">Copy all edited images as PNGs</button>
+          <button id="export-base64" type="button" class="primary full">Open Base64 originals</button>
+        </aside>
+
+        <div class="canvas-panel panel">
+          <div class="toolbar" role="toolbar" aria-label="Shape tools" id="tools"></div>
+          <div class="tool-row">
+            <div class="toolbar" role="toolbar" aria-label="Annotation colors" id="colors"></div>
+            <label class="line-control" for="line-width">Line <output id="line-width-value">4</output>
+              <input id="line-width" type="range" min="1" max="16" value="4">
+            </label>
+          </div>
+          <div class="action-row">
+            <button id="undo-action" type="button">Undo</button>
+            <button id="delete-shape" type="button" class="danger-quiet">Delete shape</button>
+            <button id="clear-annotations" type="button" class="danger-quiet">Clear annotations</button>
+          </div>
+          <div class="canvas-wrap">
+            <canvas id="annotation-canvas" width="800" height="450" tabindex="0" aria-label="Image annotation canvas"></canvas>
+          </div>
+        </div>
+
+        <aside class="properties panel" aria-label="Selected shape properties">
+          <p class="eyebrow">SELECTED SHAPE</p>
+          <label for="shape-tag-input">Tag</label>
+          <input id="shape-tag-input" type="text" placeholder="Select a shape" autocomplete="off" disabled>
+          <p class="field-help">Tags update as you type.</p>
+          <h3>Annotations</h3>
+          <ol id="annotation-list" class="item-list"></ol>
+        </aside>
+      </div>
+    </section>
+
+    <section id="sec-video" aria-labelledby="h-vid" hidden>
+      <div class="section-heading">
+        <div><p class="eyebrow">WORKSPACE 02</p><h2 id="h-vid">HTML to Video</h2></div>
+        <div id="status-video" class="save-status" role="status" aria-live="polite">Restoring local scenes…</div>
+      </div>
+      <p class="workflow-note">Build scenes in 1280 × 720, preview each one, then render a WebM locally.</p>
+      <div class="scene-actions">
+        <button id="add-scene" type="button" class="primary">Add scene</button>
+        <button id="render-video" type="button">Render final video</button>
+      </div>
+      <section class="tts-settings panel" aria-labelledby="tts-settings-heading">
+        <div class="tts-settings-heading">
+          <div>
+            <h3 id="tts-settings-heading">Transcript audio voice</h3>
+            <p class="field-help">Search an engine/model or voice and press Enter to select. Loading starts only when you test it; cached files are reused.</p>
+          </div>
+          <div class="tts-engine-actions">
+            <button id="test-tts" type="button" class="primary">Test / load selected engine</button>
+            <button id="delete-tts-cache" type="button" class="danger-quiet" hidden>Delete cached model</button>
+          </div>
+        </div>
+        <div class="tts-settings-controls">
+          <label for="tts-engine">Speech engine / model
+            <input id="tts-engine" type="text" list="tts-engine-options" autocomplete="off" spellcheck="false" aria-describedby="tts-engine-match">
+            <datalist id="tts-engine-options">
+              <option value="Auto (browser speech)"></option>
+              <option value="Phonon 31M · English"></option>
+              <option value="Kokoro-82M · multilingual"></option>
+              <option value="Browser Speech Synthesis"></option>
+            </datalist>
+            <small id="tts-engine-match" class="tts-match" aria-live="polite"></small>
+          </label>
+          <label for="tts-language">Language
+            <select id="tts-language">
+              <option value="en">English</option>
+              <option value="hi">Hindi</option>
+            </select>
+          </label>
+          <label for="tts-voice">Voice
+            <input id="tts-voice" type="text" list="tts-voice-options" autocomplete="off" spellcheck="false" aria-describedby="tts-voice-match">
+            <datalist id="tts-voice-options"></datalist>
+            <small id="tts-voice-match" class="tts-match" aria-live="polite"></small>
+          </label>
+        </div>
+        <div class="tts-settings-status">
+          <button id="tts-fallback" type="button" hidden>Switch to browser speech</button>
+          <div class="tts-progress-wrap" id="tts-progress-wrap" hidden>
+            <progress id="tts-progress" max="100" aria-label="Text-to-speech model loading progress"></progress>
+            <span id="tts-progress-label" role="status" aria-live="polite"></span>
+          </div>
+          <p id="tts-status" class="performance-status" role="status" aria-live="polite">Neural engines only load after you explicitly test them; first use needs network access and browser caching.</p>
+        </div>
+      </section>
+      <div id="scene-list" class="scene-tabs" role="tablist" aria-label="Scenes"></div>
+      <div id="scene-editor" class="panel scene-editor"></div>
+      <div class="output-grid">
+        <div class="panel preview-history" id="auto-preview-box" hidden>
+          <h3 id="auto-preview-title">Previous scene</h3>
+          <div class="stage"><iframe id="last-scene-preview" title="Previous scene preview" sandbox="allow-scripts allow-same-origin"></iframe></div>
+        </div>
+        <div class="panel output-panel">
+          <h3>Rendered output</h3>
+          <video id="video-output" controls aria-label="Rendered video"></video>
+          <button id="download-video" type="button" disabled>Download WebM</button>
+        </div>
+      </div>
+    </section>
+
+    <details id="performance-panel" class="performance-panel panel">
+      <summary>
+        <span><strong>Device &amp; Performance</strong><small id="performance-summary">Checking browser capabilities…</small></span>
+        <span class="performance-pill" id="performance-recommendation">Profiling</span>
+      </summary>
+      <div class="performance-content">
+        <div class="performance-controls">
+          <label for="performance-profile">Device profile
+            <select id="performance-profile">
+              <option value="auto">Auto</option>
+              <option value="potato">Potato</option>
+              <option value="balanced">Balanced</option>
+              <option value="high">High Quality</option>
+            </select>
+          </label>
+          <label for="preview-quality">Preview quality
+            <select id="preview-quality">
+              <option value="auto">Follow profile</option>
+              <option value="480p15">480p · 15 FPS</option>
+              <option value="720p24">720p · 24 FPS</option>
+              <option value="1080p30">1080p · 30 FPS</option>
+            </select>
+          </label>
+          <label for="export-quality">Export quality
+            <select id="export-quality">
+              <option value="auto">Follow profile</option>
+              <option value="720p24">720p · 24 FPS</option>
+              <option value="1080p30">1080p · 30 FPS</option>
+              <option value="1080p60">1080p · 60 FPS (fast systems)</option>
+            </select>
+          </label>
+        </div>
+        <div class="performance-actions">
+          <label class="inline-check" for="auto-adapt"><input id="auto-adapt" type="checkbox" checked> Adapt preview if slow</label>
+          <button id="run-benchmarks" type="button">Run lightweight benchmarks</button>
+        </div>
+        <p id="performance-status" class="performance-status" role="status" aria-live="polite">Settings are stored separately from project data.</p>
+        <details class="performance-advanced">
+          <summary>Advanced capability details</summary>
+          <dl id="performance-details"></dl>
+          <p class="engine-disclosure">
+            Phonon uses the pinned <code>phonon-tts@0.7.1</code> browser WASM package and English model from Hugging Face.
+            Kokoro uses <code>kokoro-js@1.2.1</code> with the official ONNX model. Package code and model files are requested only after Test / load.
+            Browser Speech Synthesis uses voices installed by your browser/OS. Sizes below describe model files only; runtime memory varies and is not reported as a hardware measurement.
+          </p>
+          <p class="engine-sources">
+            <a href="https://github.com/gradium-ai/xn-ptts" target="_blank" rel="noreferrer">Phonon upstream</a> ·
+            <a href="https://github.com/hexgrad/kokoro" target="_blank" rel="noreferrer">Kokoro upstream</a> ·
+            <a href="https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX" target="_blank" rel="noreferrer">Kokoro model card</a>
+          </p>
+        </details>
+      </div>
+    </details>
+
+    <aside class="storage-note" aria-label="Storage information">
+      <div><strong>Local storage</strong><span id="storage-detail">Browser IndexedDB is used for images and scenes.</span></div>
+      <button id="clear-local-data" type="button">Clear local work</button>
+    </aside>
+  </main>
+
+  <noscript><p class="noscript">This studio requires JavaScript.</p></noscript>
+  <script src="performance.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
